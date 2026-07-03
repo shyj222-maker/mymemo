@@ -7,11 +7,28 @@ import streamlit as st
 DATA_FILE = Path(__file__).parent / "todos.json"
 CATEGORIES = ["업무", "개인", "공부"]
 FILTERS = ["전체"] + CATEGORIES
+CATEGORY_OPTIONS = ["자동"] + CATEGORIES
 CATEGORY_COLORS = {
     "업무": ("#dbeafe", "#1d4ed8"),
     "개인": ("#dcfce7", "#15803d"),
     "공부": ("#ffedd5", "#c2410c"),
 }
+
+KEYWORD_RULES = [
+    ("업무", ["회의", "보고서", "업무", "미팅", "프로젝트", "발표", "이메일", "메일",
+             "출장", "기획", "클라이언트", "고객", "계약", "회사", "마감", "결재", "협업"]),
+    ("공부", ["공부", "시험", "강의", "숙제", "과제", "독서", "스터디", "수업",
+             "학습", "단어", "문제집", "자격증", "논문", "과외"]),
+    ("개인", ["운동", "병원", "약속", "친구", "가족", "쇼핑", "청소", "빨래",
+             "여행", "취미", "영화", "식사", "약국", "은행", "장보기", "산책"]),
+]
+
+
+def classify_category(text):
+    for category, keywords in KEYWORD_RULES:
+        if any(keyword in text for keyword in keywords):
+            return category
+    return "개인"
 
 
 def load_todos():
@@ -45,14 +62,24 @@ def next_id():
     return max(ids) + 1 if ids else 1
 
 
-def add_todo(text, category):
+def add_todo(text, category_choice, time_value):
     text = text.strip()
     if not text:
-        return
+        return None
+
+    category = classify_category(text) if category_choice == "자동" else category_choice
+
     st.session_state.todos.append(
-        {"id": next_id(), "text": text, "category": category, "completed": False}
+        {
+            "id": next_id(),
+            "text": text,
+            "category": category,
+            "time": time_value.strftime("%H:%M") if time_value else None,
+            "completed": False,
+        }
     )
     save_todos(st.session_state.todos)
+    return category
 
 
 def toggle_todo(todo_id):
@@ -116,20 +143,28 @@ init_state()
 st.markdown("<h1 style='text-align:center;'>할 일 관리</h1>", unsafe_allow_html=True)
 
 with st.form("add_form", clear_on_submit=True):
-    col_input, col_category, col_add = st.columns([3, 1, 1])
-    with col_input:
-        text_input = st.text_input(
-            "할 일", placeholder="할 일을 입력하세요", label_visibility="collapsed"
+    text_input = st.text_input(
+        "할 일",
+        placeholder="할 일을 입력하세요 (예: 오후 3시 팀 회의)",
+        label_visibility="collapsed",
+    )
+
+    col_time, col_category, col_add = st.columns([1, 1, 1])
+    with col_time:
+        time_input = st.time_input(
+            "시간", value=None, label_visibility="collapsed"
         )
     with col_category:
-        category_input = st.selectbox(
-            "카테고리", CATEGORIES, index=1, label_visibility="collapsed"
+        category_choice = st.selectbox(
+            "카테고리", CATEGORY_OPTIONS, index=0, label_visibility="collapsed"
         )
     with col_add:
         submitted = st.form_submit_button("추가", use_container_width=True)
 
     if submitted:
-        add_todo(text_input, category_input)
+        resolved_category = add_todo(text_input, category_choice, time_input)
+        if resolved_category and category_choice == "자동":
+            st.toast(f"'{text_input.strip()}' → {resolved_category}로 자동 분류했어요", icon="🏷️")
 
 # 프로그레스 바 영역을 먼저 예약해두고, 아래 필터 탭에서 선택된 값을 반영해 나중에 채워 넣는다.
 progress_area = st.container()
@@ -158,7 +193,7 @@ if not filtered_todos:
     st.caption("표시할 할 일이 없습니다.")
 
 for todo in filtered_todos:
-    col_check, col_text, col_tag, col_delete = st.columns([0.08, 0.6, 0.2, 0.12])
+    col_check, col_text, col_tags, col_delete = st.columns([0.08, 0.52, 0.22, 0.12])
 
     with col_check:
         st.checkbox(
@@ -177,14 +212,22 @@ for todo in filtered_todos:
             unsafe_allow_html=True,
         )
 
-    with col_tag:
+    with col_tags:
         bg, fg = CATEGORY_COLORS.get(todo["category"], ("#eee", "#555"))
-        st.markdown(
-            f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
-            f"padding:3px 9px;border-radius:999px;white-space:nowrap;'>"
-            f"{html.escape(todo['category'])}</span>",
-            unsafe_allow_html=True,
+        tag_style = (
+            "font-size:11px;font-weight:600;padding:3px 9px;"
+            "border-radius:999px;white-space:nowrap;"
         )
+        tags_html = (
+            f"<span style='{tag_style}background:{bg};color:{fg};'>"
+            f"{html.escape(todo['category'])}</span>"
+        )
+        if todo.get("time"):
+            tags_html += (
+                f" <span style='{tag_style}background:#eef0f4;color:#555;'>"
+                f"⏰ {html.escape(todo['time'])}</span>"
+            )
+        st.markdown(tags_html, unsafe_allow_html=True)
 
     with col_delete:
         st.button(
